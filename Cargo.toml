@@ -1,6 +1,3 @@
-[package]
-name = "idle-game"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
+[workspace]
+members = ["crates/engine", "crates/graphics", "crates/platform"]
+resolver = "2"

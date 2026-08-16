@@ -1,0 +1,12 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2024"
+
+[[example]]
+name = "basic"
+path = "../../examples/basic/main.rs"
+
+[dependencies]
+platform = { path = "../platform" }
+graphics = { path = "../graphics" }
