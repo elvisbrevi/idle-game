@@ -4,7 +4,8 @@ use crate::context;
 
 /// Per-frame timing state, updated once per rendered frame.
 /// The game reads it through the free functions ([`get_frame_time`],
-/// [`get_time`], [`get_fps`]); the fields are public for direct inspection.
+/// [`get_time`], [`get_fps`]); the game-relevant fields are public for
+/// direct inspection.
 pub struct TimeState {
     /// Seconds elapsed since the previous frame.
     pub delta: f32,
@@ -12,9 +13,12 @@ pub struct TimeState {
     pub elapsed: f64,
     /// Estimated frames per second (exponentially smoothed).
     pub fps: f32,
-    /// Instant of the last frame; delta is computed against it.
-    pub last_frame: Instant,
+    // engine bookkeeping: mutating it from the game would corrupt delta
+    pub(crate) last_frame: Instant,
 }
+
+/// Weight of each new sample in the FPS estimate; ~10-frame effective window.
+const FPS_SMOOTHING: f32 = 0.1;
 
 impl Default for TimeState {
     fn default() -> Self {
@@ -35,11 +39,15 @@ impl TimeState {
         self.delta = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.elapsed += self.delta as f64;
-        // exponential smoothing keeps get_fps() stable instead of jittering
-        // with per-frame deltas; ~10-frame effective window
         if self.delta > 0.0 {
             let instant_fps = 1.0 / self.delta;
-            self.fps += (instant_fps - self.fps) * 0.1;
+            // exponential smoothing keeps get_fps() stable even when frame
+            // times vary; the first frame seeds it so it never under-reports
+            if self.fps == 0.0 {
+                self.fps = instant_fps;
+            } else {
+                self.fps += (instant_fps - self.fps) * FPS_SMOOTHING;
+            }
         }
     }
 }
@@ -77,7 +85,7 @@ mod tests {
         let mut time = TimeState::default();
         assert_eq!(time.delta, 0.0);
 
-        sleep(std::time::Duration::from_millis(2));
+        sleep(std::time::Duration::from_millis(10));
         time.update();
         assert!(time.delta > 0.0);
     }
@@ -85,12 +93,12 @@ mod tests {
     #[test]
     fn update_accumulates_elapsed_time() {
         let mut time = TimeState::default();
-        sleep(std::time::Duration::from_millis(2));
+        sleep(std::time::Duration::from_millis(10));
         time.update();
         let first = time.elapsed;
         assert!(first > 0.0);
 
-        sleep(std::time::Duration::from_millis(2));
+        sleep(std::time::Duration::from_millis(10));
         time.update();
         // each frame adds its own delta, so total grows monotonically
         assert!(time.elapsed > first);
@@ -100,7 +108,7 @@ mod tests {
     #[test]
     fn update_estimates_finite_positive_fps() {
         let mut time = TimeState::default();
-        sleep(std::time::Duration::from_millis(2));
+        sleep(std::time::Duration::from_millis(10));
         time.update();
         assert!(time.fps.is_finite());
         assert!(time.fps > 0.0);
