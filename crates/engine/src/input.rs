@@ -42,8 +42,9 @@ impl InputState {
                 }
             }
             ElementState::Released => {
+                // pressed survives release: a full tap between two frames must
+                // still be seen by the next one; begin_frame() ends its lifetime
                 self.keys_down.remove(&key);
-                self.keys_pressed.remove(&key);
             }
         }
     }
@@ -134,11 +135,17 @@ mod tests {
     }
 
     #[test]
-    fn releasing_a_key_drops_it_from_pressed() {
+    fn quick_tap_inside_one_frame_gap_still_reports_pressed() {
         let mut input = InputState::default();
-        input.on_key(KeyCode::A, ElementState::Pressed);
-        input.on_key(KeyCode::A, ElementState::Released);
-        assert!(input.keys_pressed.is_empty());
+        // full press+release between two frames: the frame in between must
+        // still see the press; only begin_frame() ends its lifetime
+        input.on_key(KeyCode::Space, ElementState::Pressed);
+        input.on_key(KeyCode::Space, ElementState::Released);
+        assert!(input.keys_pressed.contains(&KeyCode::Space));
+        assert!(!input.keys_down.contains(&KeyCode::Space));
+
+        input.begin_frame();
+        assert!(!input.keys_pressed.contains(&KeyCode::Space));
     }
 
     #[test]

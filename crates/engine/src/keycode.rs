@@ -212,19 +212,19 @@ mod tests {
             NativeKeyCode::Digit8,
             NativeKeyCode::Digit9,
         ];
-        for (i, native) in natives.into_iter().enumerate() {
-            let digit = match i {
-                0 => KeyCode::Key0,
-                1 => KeyCode::Key1,
-                2 => KeyCode::Key2,
-                3 => KeyCode::Key3,
-                4 => KeyCode::Key4,
-                5 => KeyCode::Key5,
-                6 => KeyCode::Key6,
-                7 => KeyCode::Key7,
-                8 => KeyCode::Key8,
-                _ => KeyCode::Key9,
-            };
+        let digits = [
+            KeyCode::Key0,
+            KeyCode::Key1,
+            KeyCode::Key2,
+            KeyCode::Key3,
+            KeyCode::Key4,
+            KeyCode::Key5,
+            KeyCode::Key6,
+            KeyCode::Key7,
+            KeyCode::Key8,
+            KeyCode::Key9,
+        ];
+        for (native, digit) in natives.into_iter().zip(digits) {
             assert_eq!(KeyCode::from_native(native), Some(digit));
         }
     }
