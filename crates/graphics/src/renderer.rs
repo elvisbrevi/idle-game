@@ -12,6 +12,16 @@ use wgpu::{
 };
 
 use crate::pipeline;
+use crate::sprite::{quad_vertices, SpriteVertex, QUAD_INDICES};
+use crate::texture::Texture2D;
+
+struct PendingQuad {
+    vertices: [SpriteVertex; 4],
+    bind_group: wgpu::BindGroup,
+}
+
+const CAMERA_UNIFORM_SIZE: u64 = std::mem::size_of::<[[f32; 4]; 4]>() as u64;
+const QUAD_BYTES: u64 = std::mem::size_of::<[SpriteVertex; 4]>() as u64;
 
 pub struct Renderer {
     _instance: Instance,
@@ -21,6 +31,18 @@ pub struct Renderer {
     surface: Surface<'static>,
     config: SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+    texture_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    camera_uniform: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    vertex_capacity_bytes: u64,
+    index_buffer: wgpu::Buffer,
+    // NOTE: deliberate simplification — the quad list persists across redraws
+    // because the game closure runs once today; it resets per frame once
+    // next_frame() lands and drives a real loop (sprite batching ticket)
+    quads: Vec<PendingQuad>,
+    camera_matrix: [[f32; 4]; 4],
 }
 
 impl Renderer {
@@ -48,6 +70,45 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let pipeline = pipeline::create_pipeline(&device, config.format);
+        let texture_layout = pipeline.get_bind_group_layout(pipeline::TEXTURE_GROUP);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("pet2d-sampler"),
+            // nearest keeps pixel art crisp; configurable filtering comes with
+            // texture loading
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let camera_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pet2d-camera-uniform"),
+            size: CAMERA_UNIFORM_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pet2d-camera-bind-group"),
+            layout: &pipeline.get_bind_group_layout(pipeline::CAMERA_GROUP),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_uniform.as_entire_binding(),
+            }],
+        });
+
+        let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pet2d-index-buffer"),
+            size: std::mem::size_of_val(&QUAD_INDICES) as u64,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&index_buffer, 0, bytemuck::bytes_of(&QUAD_INDICES));
+
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pet2d-vertex-buffer"),
+            size: 0,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Ok(Self {
             _instance: instance,
@@ -57,7 +118,51 @@ impl Renderer {
             surface,
             config,
             pipeline,
+            texture_layout,
+            sampler,
+            camera_uniform,
+            camera_bind_group,
+            vertex_buffer,
+            vertex_capacity_bytes: 0,
+            index_buffer,
+            quads: Vec::new(),
+            camera_matrix: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
         })
+    }
+
+    /// Uploads RGBA8 data as a new GPU texture bound to the sprite pipeline.
+    pub fn create_texture(&self, width: u32, height: u32, rgba: &[u8]) -> Texture2D {
+        Texture2D::from_rgba8(
+            &self.device,
+            &self.queue,
+            &self.texture_layout,
+            &self.sampler,
+            width,
+            height,
+            rgba,
+        )
+    }
+
+    /// Queues a textured quad with its top-left corner at (x, y), sized to the
+    /// texture dimensions in pixels.
+    pub fn draw_texture(&mut self, texture: &Texture2D, x: f32, y: f32) {
+        let (width, height) = texture.size();
+        self.quads.push(PendingQuad {
+            vertices: quad_vertices(x, y, width as f32, height as f32),
+            bind_group: texture.bind_group().clone(),
+        });
+    }
+
+    /// Sets the projection applied to every queued quad on the next render.
+    ///
+    /// The matrix is column-major (`Mat4::to_cols_array_2d`).
+    pub fn set_camera(&mut self, projection: [[f32; 4]; 4]) {
+        self.camera_matrix = projection;
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -114,7 +219,43 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.draw(0..0, 0..1);
+            render_pass.set_bind_group(pipeline::CAMERA_GROUP, &self.camera_bind_group, &[]);
+            self.queue
+                .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&self.camera_matrix));
+
+            if !self.quads.is_empty() {
+                let needed_bytes = self.quads.len() as u64 * QUAD_BYTES;
+                if needed_bytes > self.vertex_capacity_bytes {
+                    self.vertex_capacity_bytes = needed_bytes.max(self.vertex_capacity_bytes * 2);
+                    self.vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("pet2d-vertex-buffer"),
+                        size: self.vertex_capacity_bytes,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                }
+                let mut vertices = Vec::with_capacity(self.quads.len() * 4);
+                for quad in &self.quads {
+                    vertices.extend_from_slice(&quad.vertices);
+                }
+                self.queue.write_buffer(
+                    &self.vertex_buffer,
+                    0,
+                    bytemuck::cast_slice(&vertices),
+                );
+
+                render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(
+                    self.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                // one draw per texture group; SpriteBatch (texture loading
+                // ticket) collapses same-texture runs into single draw calls
+                for (i, quad) in self.quads.iter().enumerate() {
+                    render_pass.set_bind_group(pipeline::TEXTURE_GROUP, &quad.bind_group, &[]);
+                    render_pass.draw_indexed(0..6, (i * 4) as i32, 0..1);
+                }
+            }
         }
 
         self.queue.submit(Some(encoder.finish()));
