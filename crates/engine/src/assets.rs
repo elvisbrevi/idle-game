@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::Texture2D;
 use crate::context;
+use crate::error::EngineError;
 
 /// Cache of loaded assets keyed by path (CONTEXT.md: AssetServer). Generic
 /// over the resource type so the caching behavior is testable without a GPU;
@@ -19,65 +20,62 @@ impl<V: Clone> Default for AssetServer<V> {
 }
 
 impl<V: Clone> AssetServer<V> {
-    /// Returns the cached resource for `path`, loading it through `load` on
-    /// first access only.
-    pub(crate) fn entry(&mut self, path: &str, load: impl FnOnce(&str) -> V) -> V {
-        self.resources
-            .entry(path.to_string())
-            .or_insert_with(|| load(path))
-            .clone()
+    /// Returns the cached resource for `path`, if it was loaded before.
+    pub(crate) fn get(&self, path: &str) -> Option<V> {
+        self.resources.get(path).cloned()
+    }
+
+    /// Stores a successfully loaded resource under `path`.
+    pub(crate) fn insert(&mut self, path: &str, resource: V) {
+        self.resources.insert(path.to_string(), resource);
     }
 }
 
 /// Loads a texture from an image file (PNG, JPEG, ...) and caches it by path
 /// (ADR-0008). Synchronous: blocks until the image is decoded and uploaded to
-/// the GPU. Repeated calls with the same path return the cached texture.
+/// the GPU. Repeated calls with the same path return the cached texture;
+/// failed loads are not cached and can be retried.
 ///
-/// Panics if the file is missing or undecodable, and if called outside of
-/// [`crate::run`] (ADR-0001).
-pub fn load_texture(path: &str) -> Texture2D {
+/// Panics if called outside of [`crate::run`] (ADR-0001).
+pub fn load_texture(path: &str) -> Result<Texture2D, EngineError> {
     context::with_mut(|ctx| {
-        // destructure to borrow the cache and the renderer disjointly
-        let context::Context {
-            assets, renderer, ..
-        } = ctx;
-        assets.entry(path, |path| renderer.load_texture(path))
+        if let Some(texture) = ctx.assets.get(path) {
+            return Ok(texture);
+        }
+        // destructure to borrow the cache and the renderer disjointly only
+        // where needed; a failed load must not insert anything
+        let texture = ctx.renderer.load_texture(path)?;
+        ctx.assets.insert(path, texture.clone());
+        Ok(texture)
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
-    use std::rc::Rc;
 
     #[test]
-    fn loads_each_path_once_and_caches_it() {
-        let loads = Rc::new(Cell::new(0));
+    fn caches_each_path_after_first_insert() {
         let mut server = AssetServer::<u32>::default();
-        let counter = loads.clone();
-        let first = server.entry("cat.png", |path| {
-            assert_eq!(path, "cat.png");
-            counter.set(counter.get() + 1);
-            7
-        });
-        let second = server.entry("cat.png", |_| unreachable!("cache hit must not reload"));
-        assert_eq!(first, 7);
-        assert_eq!(second, 7);
-        assert_eq!(loads.get(), 1);
+        assert_eq!(server.get("cat.png"), None);
+        server.insert("cat.png", 7);
+        assert_eq!(server.get("cat.png"), Some(7));
+        assert_eq!(server.get("cat.png"), Some(7));
     }
 
     #[test]
-    fn different_paths_load_separately() {
+    fn unknown_paths_miss_and_inserts_are_visible() {
         let mut server = AssetServer::<u32>::default();
-        assert_eq!(server.entry("a.png", |_| 1), 1);
-        assert_eq!(server.entry("b.png", |_| 2), 2);
-        assert_eq!(server.entry("a.png", |_| unreachable!()), 1);
+        assert_eq!(server.get("a.png"), None);
+        server.insert("a.png", 1);
+        server.insert("b.png", 2);
+        assert_eq!(server.get("a.png"), Some(1));
+        assert_eq!(server.get("b.png"), Some(2));
     }
 
     #[test]
     #[should_panic(expected = "pet2d: fuera de contexto")]
     fn load_texture_panics_outside_of_run_context() {
-        load_texture("definitely/not/here.png");
+        let _ = load_texture("definitely/not/here.png");
     }
 }

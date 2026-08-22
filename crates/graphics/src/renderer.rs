@@ -12,9 +12,16 @@ use wgpu::{
 };
 
 use crate::batch::SpriteBatch;
+use crate::color::Color;
 use crate::pipeline;
-use crate::sprite::{DrawTextureParams, QUAD_INDICES, SpriteVertex, sprite_quad};
+use crate::sprite::{
+    DrawTextureParams, QUAD_INDICES, SpriteVertex, circle_fan, solid_quad, sprite_quad,
+};
 use crate::texture::{Samplers, Texture2D, decode_image_file};
+
+/// Rim vertices used to approximate [`Renderer::draw_circle`]; 48 keeps the
+/// silhouette smooth at pet scale without wasting fill-rate.
+const CIRCLE_SEGMENTS: u16 = 48;
 
 const CAMERA_UNIFORM_SIZE: u64 = std::mem::size_of::<[[f32; 4]; 4]>() as u64;
 const VERTEX_BYTES: u64 = std::mem::size_of::<SpriteVertex>() as u64;
@@ -58,13 +65,14 @@ pub struct Renderer {
     vertex_capacity_bytes: u64,
     index_buffer: wgpu::Buffer,
     index_capacity_bytes: u64,
-    // NOTE: deliberate simplification — the batch persists across redraws
-    // because the game closure runs once today; it resets per frame once
-    // next_frame() lands and drives a real loop
+    // NOTE: the batch resets per frame once render() flushes it, so draws
+    // queue up between one next_frame() and the next (ADR-0005)
     batch: SpriteBatch<wgpu::BindGroup>,
+    /// Shared 1x1 white texture backing solid shapes: their color comes from
+    /// the vertex tint alone.
+    white_texture: Texture2D,
     camera_matrix: [[f32; 4]; 4],
 }
-
 impl Renderer {
     pub fn new(
         window: impl WindowHandle + 'static,
@@ -118,6 +126,16 @@ impl Renderer {
         });
         queue.write_buffer(&index_buffer, 0, bytemuck::bytes_of(&QUAD_INDICES));
 
+        let white_texture = Texture2D::from_rgba8(
+            &device,
+            &queue,
+            &texture_layout,
+            samplers.get(wgpu::FilterMode::Nearest),
+            1,
+            1,
+            &[255, 255, 255, 255],
+        );
+
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("pet2d-vertex-buffer"),
             size: 0,
@@ -142,6 +160,7 @@ impl Renderer {
             index_buffer,
             index_capacity_bytes: std::mem::size_of_val(&QUAD_INDICES) as u64,
             batch: SpriteBatch::new(),
+            white_texture,
             camera_matrix: [
                 [1.0, 0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0, 0.0],
@@ -177,10 +196,31 @@ impl Renderer {
     }
 
     /// Decodes an image file from disk and uploads it as a GPU texture
-    /// (ADR-0008). Synchronous; panics if the file cannot be loaded.
-    pub fn load_texture(&self, path: &str) -> Texture2D {
-        let (width, height, rgba) = decode_image_file(path);
-        self.create_texture(width, height, &rgba)
+    /// (ADR-0008). Synchronous: blocks until the image is decoded and on the
+    /// GPU.
+    pub fn load_texture(&self, path: &str) -> Result<Texture2D, crate::GraphicsError> {
+        let (width, height, rgba) =
+            decode_image_file(path).map_err(|source| crate::GraphicsError::TextureLoad {
+                path: path.to_string(),
+                source,
+            })?;
+        Ok(self.create_texture(width, height, &rgba))
+    }
+
+    /// Queues a filled solid-color rectangle with its top-left corner at
+    /// `(x, y)`, sized `(width, height)` in world units.
+    pub fn draw_rectangle(&mut self, x: f32, y: f32, width: f32, height: f32, color: Color) {
+        let quad = solid_quad(x, y, width, height, color);
+        self.batch
+            .push_quad(self.white_texture.bind_group().clone(), &quad);
+    }
+
+    /// Queues a filled solid-color circle centered at `(x, y)` with `radius`
+    /// in world units.
+    pub fn draw_circle(&mut self, x: f32, y: f32, radius: f32, color: Color) {
+        let (vertices, indices) = circle_fan(x, y, radius, color, CIRCLE_SEGMENTS);
+        self.batch
+            .push_vertices(self.white_texture.bind_group().clone(), &vertices, &indices);
     }
 
     /// Queues a textured quad with its top-left corner at (x, y), sized to the
@@ -317,6 +357,9 @@ impl Renderer {
                 }
             }
         }
+
+        // the queued frame is encoded; the next one starts from an empty batch
+        self.batch.clear();
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();

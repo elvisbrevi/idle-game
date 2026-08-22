@@ -15,13 +15,24 @@ pub(crate) struct Context {
     pub(crate) camera: Camera2D,
     pub(crate) input: InputState,
     pub(crate) time: TimeState,
+    /// Handle to the OS window for runtime window control
+    /// ([`crate::set_window_position`], [`crate::set_window_size`]).
+    pub(crate) window: platform::WindowHandle,
+    /// Number of frames presented so far; drives [`crate::next_frame`].
+    pub(crate) frame: u64,
 }
 
 thread_local! {
     static CONTEXT: RefCell<Option<Context>> = const { RefCell::new(None) };
 }
 
-pub(crate) fn init(renderer: graphics::Renderer, clear_color: Color, width: f32, height: f32) {
+pub(crate) fn init(
+    renderer: graphics::Renderer,
+    window: platform::WindowHandle,
+    clear_color: Color,
+    width: f32,
+    height: f32,
+) {
     CONTEXT.with(|cell| {
         *cell.borrow_mut() = Some(Context {
             renderer,
@@ -32,8 +43,19 @@ pub(crate) fn init(renderer: graphics::Renderer, clear_color: Color, width: f32,
             camera: Camera2D::default(),
             input: InputState::default(),
             time: TimeState::default(),
+            window,
+            frame: 0,
         });
     });
+}
+
+impl Context {
+    /// Applies a new pixel size to the cached dimensions and render surface.
+    pub(crate) fn resize(&mut self, width: u32, height: u32) {
+        self.width = width as f32;
+        self.height = height as f32;
+        self.renderer.resize(width, height);
+    }
 }
 
 pub(crate) fn with<R>(f: impl FnOnce(&Context) -> R) -> R {

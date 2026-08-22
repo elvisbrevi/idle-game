@@ -8,6 +8,6 @@ Aunque el motor tiene un mini-executor async, `load_texture()` se expone como fu
 - `load_texture()` con callback → rechazado: complicado, innecesario.
 
 **Consequences:**
-- `pub fn load_texture(path: &str) -> Texture2D` (bloquea hasta que carga).
+- `pub fn load_texture(path: &str) -> Result<Texture2D, EngineError>` (bloquea hasta que carga; _amend ticket 07_: la firma pasa a `Result` según ADR-0004, los fallos nombran la ruta y no se cachean).
 - Internamente: `image::open()` → `rgba` → `device.create_texture()` → `queue.write_texture()`.
 - Futuro: `load_texture_async()` si se necesita no bloquear.

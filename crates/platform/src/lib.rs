@@ -22,6 +22,26 @@ impl WindowHandle {
         let size = self.inner.inner_size();
         (size.width, size.height)
     }
+
+    /// Resizes the window in physical pixels, matching what `inner_size()`
+    /// reports. Applied synchronously on macOS and Windows; Wayland-like
+    /// backends (out of scope) only confirm via a later resize event.
+    pub fn set_inner_size(&self, width: u32, height: u32) {
+        let applied = self
+            .inner
+            .request_inner_size(winit::dpi::PhysicalSize::new(width.max(1), height.max(1)));
+        // backends that apply immediately report the same size back
+        debug_assert!(applied.is_none_or(|s| (s.width, s.height) == (width.max(1), height.max(1))));
+    }
+
+    /// Moves the window's top-left corner to physical screen coordinates.
+    pub fn set_outer_position(&self, x: f32, y: f32) {
+        self.inner
+            .set_outer_position(winit::dpi::PhysicalPosition::new(
+                f64::from(x),
+                f64::from(y),
+            ));
+    }
 }
 
 impl HasWindowHandle for WindowHandle {
@@ -54,8 +74,6 @@ struct App<F: FnMut(FrameEvent)> {
     width: u32,
     height: u32,
     window: Option<Arc<Window>>,
-    game_fn: Option<Box<dyn FnOnce()>>,
-    game_started: bool,
     frame_handler: F,
 }
 
@@ -86,12 +104,6 @@ impl<F: FnMut(FrameEvent)> ApplicationHandler for App<F> {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
-                if !self.game_started {
-                    self.game_started = true;
-                    if let Some(f) = self.game_fn.take() {
-                        f();
-                    }
-                }
                 (self.frame_handler)(FrameEvent::Redraw);
                 if let Some(w) = &self.window {
                     w.request_redraw();
@@ -134,21 +146,13 @@ impl<F: FnMut(FrameEvent)> ApplicationHandler for App<F> {
     fn memory_warning(&mut self, _event_loop: &ActiveEventLoop) {}
 }
 
-pub fn run(
-    title: &str,
-    width: u32,
-    height: u32,
-    game_fn: impl FnOnce() + 'static,
-    frame_handler: impl FnMut(FrameEvent) + 'static,
-) {
+pub fn run(title: &str, width: u32, height: u32, frame_handler: impl FnMut(FrameEvent) + 'static) {
     let event_loop = EventLoop::new().unwrap();
     let mut app = App {
         title: title.into(),
         width,
         height,
         window: None,
-        game_fn: Some(Box::new(game_fn)),
-        game_started: false,
         frame_handler,
     };
     event_loop.run_app(&mut app).unwrap();

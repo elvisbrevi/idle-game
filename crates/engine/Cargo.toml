@@ -15,7 +15,12 @@ path = "../../examples/sprite/main.rs"
 name = "input"
 path = "../../examples/input/main.rs"
 
+[[example]]
+name = "full"
+path = "../../examples/full/main.rs"
+
 [dependencies]
 platform = { path = "../platform" }
 graphics = { path = "../graphics" }
 glam = "0.29"
+thiserror = "2"
