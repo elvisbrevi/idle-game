@@ -4,6 +4,7 @@ use crate::assets::AssetServer;
 use crate::camera::Camera2D;
 use crate::color::Color;
 use crate::input::InputState;
+use crate::time::TimeState;
 
 pub(crate) struct Context {
     pub(crate) renderer: graphics::Renderer,
@@ -13,6 +14,7 @@ pub(crate) struct Context {
     pub(crate) height: f32,
     pub(crate) camera: Camera2D,
     pub(crate) input: InputState,
+    pub(crate) time: TimeState,
 }
 
 thread_local! {
@@ -29,6 +31,7 @@ pub(crate) fn init(renderer: graphics::Renderer, clear_color: Color, width: f32,
             height,
             camera: Camera2D::default(),
             input: InputState::default(),
+            time: TimeState::default(),
         });
     });
 }
