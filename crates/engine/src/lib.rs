@@ -1,13 +1,18 @@
+mod camera;
 pub mod color;
 mod context;
 pub mod draw;
 pub mod keycode;
+mod math;
 pub mod mouse;
 pub mod window;
 
+pub use camera::{set_camera, set_default_camera, Camera2D};
 pub use color::Color;
-pub use draw::clear_background;
+pub use draw::{clear_background, draw_texture};
+pub use graphics::Texture2D;
 pub use keycode::KeyCode;
+pub use math::{Mat4, Vec2};
 pub use mouse::MouseButton;
 pub use window::{WindowConfig, screen_height, screen_width};
 
@@ -36,7 +41,11 @@ pub fn run(config: WindowConfig, game_fn: impl FnOnce() + 'static) {
                 });
             }
             platform::FrameEvent::Redraw => {
-                context::with_mut(|ctx| ctx.renderer.render(ctx.clear_color.to_rgba()));
+                context::with_mut(|ctx| {
+                    let projection = ctx.camera.projection_matrix(ctx.width, ctx.height);
+                    ctx.renderer.set_camera(projection.to_cols_array_2d());
+                    ctx.renderer.render(ctx.clear_color.to_rgba());
+                });
             }
         },
     );

@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 
+use crate::camera::Camera2D;
 use crate::color::Color;
 
 pub(crate) struct Context {
@@ -7,6 +8,7 @@ pub(crate) struct Context {
     pub(crate) clear_color: Color,
     pub(crate) width: f32,
     pub(crate) height: f32,
+    pub(crate) camera: Camera2D,
 }
 
 thread_local! {
@@ -25,6 +27,7 @@ pub(crate) fn init(
             clear_color,
             width,
             height,
+            camera: Camera2D::default(),
         });
     });
 }

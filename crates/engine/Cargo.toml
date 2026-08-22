@@ -10,3 +10,4 @@ path = "../../examples/basic/main.rs"
 [dependencies]
 platform = { path = "../platform" }
 graphics = { path = "../graphics" }
+glam = "0.29"

@@ -1,7 +1,12 @@
 mod pipeline;
+#[cfg(test)]
+mod render_test;
 mod renderer;
+mod sprite;
+mod texture;
 
 pub use renderer::Renderer;
+pub use texture::Texture2D;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GraphicsError {
