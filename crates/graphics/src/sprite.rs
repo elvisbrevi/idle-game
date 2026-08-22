@@ -142,6 +142,54 @@ pub(crate) fn sprite_quad(
     })
 }
 
+/// Builds the four corners of a solid-color rectangle with its top-left
+/// corner at `(x, y)`, sized `(w, h)` in world units. Shapes sample a shared
+/// 1x1 white texture, so the tint alone decides their color.
+pub(crate) fn solid_quad(x: f32, y: f32, w: f32, h: f32, color: Color) -> [SpriteVertex; 4] {
+    sprite_quad(
+        (1.0, 1.0),
+        x,
+        y,
+        &DrawTextureParams {
+            dest_size: Some(Vec2::new(w, h)),
+            color,
+            ..Default::default()
+        },
+    )
+}
+
+/// Builds a triangle fan approximating a filled circle centered at `(x, y)`
+/// with `radius` in world units and `segments` rim vertices. Returns fan
+/// vertices plus relative indices, ready for [`crate::batch::SpriteBatch`].
+pub(crate) fn circle_fan(
+    x: f32,
+    y: f32,
+    radius: f32,
+    color: Color,
+    segments: u16,
+) -> (Vec<SpriteVertex>, Vec<u32>) {
+    let tint = color.to_rgba();
+    let mut vertices = Vec::with_capacity(segments as usize + 1);
+    vertices.push(SpriteVertex {
+        position: [x, y],
+        uv: [0.5, 0.5],
+        color: tint,
+    });
+    for i in 0..segments {
+        let angle = i as f32 * std::f32::consts::TAU / segments as f32;
+        vertices.push(SpriteVertex {
+            position: [x + radius * angle.cos(), y + radius * angle.sin()],
+            uv: [0.5, 0.5],
+            color: tint,
+        });
+    }
+    let mut indices: Vec<u32> = Vec::with_capacity(segments as usize * 3);
+    for i in 1..=segments {
+        indices.extend_from_slice(&[0, i as u32, u32::from(i % segments) + 1]);
+    }
+    (vertices, indices)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,5 +307,59 @@ mod tests {
             ..Default::default()
         };
         assert!(quad(params).iter().all(|v| v.color == [1.0, 0.0, 0.0, 1.0]));
+    }
+
+    #[test]
+    fn solid_quad_is_a_tinted_rectangle_at_pixel_size() {
+        let vertices = solid_quad(10.0, 20.0, 30.0, 40.0, Color::new(0.5, 0.25, 0.0, 1.0));
+        assert_eq!(
+            positions(&vertices),
+            [[10.0, 20.0], [40.0, 20.0], [40.0, 60.0], [10.0, 60.0]]
+        );
+        // every corner carries the requested color; any uv inside [0, 1]
+        // samples the same texel of the shared 1x1 white texture
+        assert!(vertices.iter().all(|v| v.color == [0.5, 0.25, 0.0, 1.0]));
+        assert!(vertices.iter().all(|v| (0.0..=1.0).contains(&v.uv[0])));
+    }
+
+    #[test]
+    fn circle_fan_centers_the_fan_on_the_ring() {
+        let (vertices, indices) = circle_fan(100.0, 50.0, 8.0, Color::WHITE, 4);
+
+        assert_eq!(vertices.len(), 5);
+        assert_eq!(vertices[0].position, [100.0, 50.0]);
+        // 4 segments: ring vertices sit at angles 0, 90, 180, 270 degrees
+        let ring: Vec<[f32; 2]> = vertices[1..].iter().map(|v| v.position).collect();
+        for (angle, expected) in
+            ring.iter()
+                .zip([[108.0, 50.0], [100.0, 58.0], [92.0, 50.0], [100.0, 42.0]])
+        {
+            assert!(
+                (angle[0] - expected[0]).abs() < 1e-5 && (angle[1] - expected[1]).abs() < 1e-5,
+                "{ring:?}"
+            );
+        }
+        assert_eq!(indices, &[0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1]);
+    }
+
+    #[test]
+    fn circle_fan_indices_close_the_ring_for_any_segment_count() {
+        let segments = 48;
+        let (_, indices) = circle_fan(0.0, 0.0, 1.0, Color::WHITE, segments);
+        assert_eq!(indices.len(), segments as usize * 3);
+        // every triangle references the fan center and two adjacent rim
+        // vertices, with the last triangle wrapping back to the first
+        for (i, tri) in indices.chunks_exact(3).enumerate() {
+            assert_eq!(
+                tri,
+                &[0, i as u32 + 1, (i as u32 + 1) % segments as u32 + 1]
+            );
+        }
+    }
+
+    #[test]
+    fn circle_fan_tints_all_vertices() {
+        let (vertices, _) = circle_fan(0.0, 0.0, 1.0, Color::BLUE, 6);
+        assert!(vertices.iter().all(|v| v.color == [0.0, 0.0, 1.0, 1.0]));
     }
 }

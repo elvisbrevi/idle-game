@@ -235,7 +235,7 @@ fn png_with_transparency_draws_through_sprite_batch() {
         .unwrap()
         .save(&path)
         .expect("failed to write test PNG");
-    let (width, height, rgba) = crate::texture::decode_image_file(path.to_str().unwrap());
+    let (width, height, rgba) = crate::texture::decode_image_file(path.to_str().unwrap()).unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!((width, height), (2, 1));
 

@@ -116,15 +116,10 @@ impl Texture2D {
 }
 
 /// Decodes an image file from disk into raw RGBA8 pixels (ADR-0008).
-///
-/// Panics with the path in the message when the file is missing or not a
-/// decodable image; the synchronous API has no error channel yet.
-pub(crate) fn decode_image_file(path: &str) -> (u32, u32, Vec<u8>) {
-    let img = image::open(path)
-        .unwrap_or_else(|err| panic!("pet2d: failed to load texture '{path}': {err}"))
-        .to_rgba8();
+pub(crate) fn decode_image_file(path: &str) -> Result<(u32, u32, Vec<u8>), image::ImageError> {
+    let img = image::open(path)?.to_rgba8();
     let (width, height) = img.dimensions();
-    (width, height, img.into_raw())
+    Ok((width, height, img.into_raw()))
 }
 
 #[cfg(test)]
@@ -138,7 +133,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("pet2d-test-{}.png", std::process::id()));
         png.save(&path).expect("failed to write test PNG");
 
-        let (width, height, rgba) = decode_image_file(path.to_str().unwrap());
+        let (width, height, rgba) = decode_image_file(path.to_str().unwrap()).unwrap();
         let _ = std::fs::remove_file(&path);
 
         assert_eq!((width, height), (2, 1));
@@ -146,8 +141,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "pet2d: failed to load texture")]
-    fn missing_file_panics_naming_the_path() {
-        decode_image_file("definitely/not/here.png");
+    fn missing_file_reports_an_error() {
+        let err = decode_image_file("definitely/not/here.png").unwrap_err();
+        assert!(matches!(err, image::ImageError::IoError(_)));
     }
 }

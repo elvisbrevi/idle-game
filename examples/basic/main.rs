@@ -1,10 +1,16 @@
-use engine::{Color, WindowConfig, clear_background, run};
+//! Basic example: opens a window and clears it every frame.
+//!
+//! Run from the repo root: `cargo run -p engine --example basic`
+use engine::{Color, WindowConfig, clear_background, next_frame, run};
 
 fn main() {
     let config = WindowConfig::default();
-    run(config, || {
-        // Clears to a custom color; the engine repaints it on every frame
-        // and after resizes. next_frame() arrives in a later ticket.
-        clear_background(Color::from_rgb(30, 30, 46));
+    run(config, || async {
+        loop {
+            // the engine fills each presented frame with this color behind
+            // everything drawn on top
+            clear_background(Color::from_rgb(30, 30, 46));
+            next_frame().await;
+        }
     });
 }

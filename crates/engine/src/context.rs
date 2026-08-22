@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::task::Waker;
 
 use crate::assets::AssetServer;
 use crate::camera::Camera2D;
@@ -15,13 +16,27 @@ pub(crate) struct Context {
     pub(crate) camera: Camera2D,
     pub(crate) input: InputState,
     pub(crate) time: TimeState,
+    /// Handle to the OS window for runtime window control
+    /// ([`crate::set_window_position`], [`crate::set_window_size`]).
+    pub(crate) window: platform::WindowHandle,
+    /// Number of frames presented so far; drives [`crate::next_frame`].
+    pub(crate) frame: u64,
+    /// Waker of the [`crate::next_frame`] future currently waiting on the
+    /// next presented frame.
+    pub(crate) frame_waker: Option<Waker>,
 }
 
 thread_local! {
     static CONTEXT: RefCell<Option<Context>> = const { RefCell::new(None) };
 }
 
-pub(crate) fn init(renderer: graphics::Renderer, clear_color: Color, width: f32, height: f32) {
+pub(crate) fn init(
+    renderer: graphics::Renderer,
+    window: platform::WindowHandle,
+    clear_color: Color,
+    width: f32,
+    height: f32,
+) {
     CONTEXT.with(|cell| {
         *cell.borrow_mut() = Some(Context {
             renderer,
@@ -32,6 +47,9 @@ pub(crate) fn init(renderer: graphics::Renderer, clear_color: Color, width: f32,
             camera: Camera2D::default(),
             input: InputState::default(),
             time: TimeState::default(),
+            window,
+            frame: 0,
+            frame_waker: None,
         });
     });
 }
