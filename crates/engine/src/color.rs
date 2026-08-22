@@ -18,6 +18,10 @@ impl Color {
         Self { r, g, b, a }
     }
 
+    pub fn to_rgba(self) -> [f32; 4] {
+        [self.r, self.g, self.b, self.a]
+    }
+
     pub fn from_rgb(r: u8, g: u8, b: u8) -> Self {
         Self {
             r: r as f32 / 255.0,

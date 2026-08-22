@@ -1,15 +1,10 @@
-use engine::{run, Color, WindowConfig};
+use engine::{WindowConfig, clear_background, run, Color};
 
 fn main() {
-    let config = WindowConfig {
-        background: Color::from_rgb(30, 30, 46),
-        ..Default::default()
-    };
+    let config = WindowConfig::default();
     run(config, || {
-        // Game loop placeholder — window opens with solid background
-        // Ticket 02 adds next_frame() + clear_background()
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
+        // Clears to a custom color; the engine repaints it on every frame
+        // and after resizes. next_frame() arrives in a later ticket.
+        clear_background(Color::from_rgb(30, 30, 46));
     });
 }
