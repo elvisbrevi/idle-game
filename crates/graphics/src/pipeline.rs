@@ -35,7 +35,12 @@ fn vs_main(
 
 @fragment
 fn fs_main(output: VsOutput) -> @location(0) vec4<f32> {
-    return textureSample(t_texture, t_sampler, output.uv) * output.color;
+    var color = textureSample(t_texture, t_sampler, output.uv) * output.color;
+    // premultiplied output: matches CompositeAlphaMode::PreMultiplied so
+    // transparent windows (desktop pet) composite without edge halos; over
+    // an opaque background the result is identical to straight "over"
+    color = vec4(color.rgb * color.a, color.a);
+    return color;
 }
 "#;
 
@@ -106,7 +111,9 @@ pub(crate) fn create_pipeline(
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                // shader premultiplies first (see fs_main); this keeps the
+                // framebuffer valid for PreMultiplied surface compositing
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

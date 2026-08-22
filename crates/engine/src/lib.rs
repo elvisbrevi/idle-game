@@ -38,6 +38,8 @@ pub use math::{Mat4, Rect, Vec2, Vec3};
 pub use mouse::MouseButton;
 pub use spritesheet::{Animation, SpriteSheet};
 pub use time::{TimeState, get_fps, get_frame_time, get_time};
+#[cfg(feature = "desktop-pet")]
+pub use window::DesktopPetConfig;
 pub use window::{WindowConfig, screen_height, screen_width, set_window_position, set_window_size};
 
 /// Runs the game with the given configuration (ADR-0003).
@@ -68,7 +70,7 @@ where
     // hand-rolled executor — no async runtime involved
     let future: RefCell<Option<Pin<Box<dyn Future<Output = ()>>>>> = RefCell::new(None);
 
-    platform::run(&config.title, config.width, config.height, move |event| {
+    let handler = move |event: platform::FrameEvent| {
         match event {
             platform::FrameEvent::WindowReady(handle, width, height) => {
                 // graphics clamps degenerate sizes before configuring the surface
@@ -131,5 +133,18 @@ where
                 context::with_mut(|ctx| ctx.input.on_cursor_moved(x, y));
             }
         }
-    });
+    };
+
+    #[cfg(feature = "desktop-pet")]
+    {
+        let pet = config.pet.map(|pet| platform::PetWindowOptions {
+            always_on_top: pet.always_on_top,
+            transparent: pet.transparent,
+            click_through: pet.click_through,
+            decorations: pet.decorations,
+        });
+        platform::run(&config.title, config.width, config.height, pet, handler);
+    }
+    #[cfg(not(feature = "desktop-pet"))]
+    platform::run(&config.title, config.width, config.height, handler);
 }

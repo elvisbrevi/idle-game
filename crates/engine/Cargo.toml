@@ -23,6 +23,14 @@ path = "../../examples/input/main.rs"
 name = "full"
 path = "../../examples/full/main.rs"
 
+[[example]]
+name = "desktop_pet"
+path = "../../examples/desktop_pet/main.rs"
+required-features = ["desktop-pet"]
+
+[features]
+desktop-pet = ["platform/desktop-pet"]
+
 [dependencies]
 platform = { path = "../platform" }
 graphics = { path = "../graphics" }

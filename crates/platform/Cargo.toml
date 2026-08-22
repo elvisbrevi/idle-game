@@ -3,6 +3,9 @@ name = "platform"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+desktop-pet = []
+
 [dependencies]
 winit = "0.30"
 raw-window-handle = "0.6"
