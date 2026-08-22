@@ -1,20 +1,58 @@
 use std::sync::Arc;
 
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowAttributes};
 
-struct App {
+#[derive(Clone)]
+pub struct WindowHandle {
+    inner: Arc<Window>,
+}
+
+impl WindowHandle {
+    pub(crate) fn new(inner: Arc<Window>) -> Self {
+        Self { inner }
+    }
+
+    pub fn inner_size(&self) -> (u32, u32) {
+        let size = self.inner.inner_size();
+        (size.width, size.height)
+    }
+}
+
+impl HasWindowHandle for WindowHandle {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+        self.inner.window_handle()
+    }
+}
+
+impl HasDisplayHandle for WindowHandle {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        self.inner.display_handle()
+    }
+}
+
+pub enum FrameEvent {
+    WindowReady(WindowHandle, u32, u32),
+    Resized(u32, u32),
+    Redraw,
+}
+
+struct App<F: FnMut(FrameEvent)> {
     title: String,
     width: u32,
     height: u32,
     window: Option<Arc<Window>>,
     game_fn: Option<Box<dyn FnOnce()>>,
     game_started: bool,
+    frame_handler: F,
 }
 
-impl ApplicationHandler for App {
+impl<F: FnMut(FrameEvent)> ApplicationHandler for App<F> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -22,7 +60,14 @@ impl ApplicationHandler for App {
         let attrs = WindowAttributes::default()
             .with_title(&self.title)
             .with_inner_size(winit::dpi::LogicalSize::new(self.width, self.height));
-        self.window = Some(Arc::new(event_loop.create_window(attrs).unwrap()));
+        let window = Arc::new(event_loop.create_window(attrs).unwrap());
+        let size = window.inner_size();
+        (self.frame_handler)(FrameEvent::WindowReady(
+            WindowHandle::new(window.clone()),
+            size.width,
+            size.height,
+        ));
+        self.window = Some(window);
     }
 
     fn window_event(
@@ -40,11 +85,13 @@ impl ApplicationHandler for App {
                         f();
                     }
                 }
+                (self.frame_handler)(FrameEvent::Redraw);
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
             }
-            WindowEvent::Resized(_size) => {
+            WindowEvent::Resized(size) => {
+                (self.frame_handler)(FrameEvent::Resized(size.width, size.height));
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
@@ -70,6 +117,7 @@ pub fn run(
     width: u32,
     height: u32,
     game_fn: impl FnOnce() + 'static,
+    frame_handler: impl FnMut(FrameEvent) + 'static,
 ) {
     let event_loop = EventLoop::new().unwrap();
     let mut app = App {
@@ -79,6 +127,7 @@ pub fn run(
         window: None,
         game_fn: Some(Box::new(game_fn)),
         game_started: false,
+        frame_handler,
     };
     event_loop.run_app(&mut app).unwrap();
 }
