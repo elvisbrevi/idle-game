@@ -7,6 +7,7 @@ mod input;
 pub mod keycode;
 mod math;
 pub mod mouse;
+mod time;
 pub mod window;
 
 pub use assets::load_texture;
@@ -19,6 +20,7 @@ pub use input::{InputState, is_key_down, is_key_pressed, is_mouse_button_down, m
 pub use keycode::KeyCode;
 pub use math::{Mat4, Vec2};
 pub use mouse::MouseButton;
+pub use time::{TimeState, get_fps, get_frame_time, get_time};
 pub use window::{WindowConfig, screen_height, screen_width};
 
 /// Runs the game with the given configuration.
@@ -47,6 +49,7 @@ pub fn run(config: WindowConfig, game_fn: impl FnOnce() + 'static) {
             }
             platform::FrameEvent::Redraw => {
                 context::with_mut(|ctx| {
+                    ctx.time.update();
                     let projection = ctx.camera.projection_matrix(ctx.width, ctx.height);
                     ctx.renderer.set_camera(projection.to_cols_array_2d());
                     ctx.renderer.render(ctx.clear_color.to_rgba());
