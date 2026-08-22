@@ -1,3 +1,5 @@
+mod batch;
+mod color;
 mod pipeline;
 #[cfg(test)]
 mod render_test;
@@ -5,7 +7,9 @@ mod renderer;
 mod sprite;
 mod texture;
 
+pub use color::Color;
 pub use renderer::Renderer;
+pub use sprite::{DrawTextureParams, Rect};
 pub use texture::Texture2D;
 
 #[derive(Debug, thiserror::Error)]

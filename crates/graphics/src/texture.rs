@@ -1,9 +1,45 @@
-use wgpu::{BindGroup, BindGroupLayout, Device, Extent3d, TexelCopyBufferLayout, Queue, Sampler};
+use wgpu::{
+    BindGroup, BindGroupLayout, Device, Extent3d, FilterMode, Queue, TexelCopyBufferLayout,
+};
+
+/// The shared sampler pair: nearest keeps pixel art crisp, linear smooths
+/// scaled sprites. Textures pick one at creation time.
+pub(crate) struct Samplers {
+    nearest: wgpu::Sampler,
+    linear: wgpu::Sampler,
+}
+
+impl Samplers {
+    pub(crate) fn new(device: &Device) -> Self {
+        Self {
+            nearest: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("pet2d-sampler-nearest"),
+                mag_filter: FilterMode::Nearest,
+                min_filter: FilterMode::Nearest,
+                ..Default::default()
+            }),
+            linear: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("pet2d-sampler-linear"),
+                mag_filter: FilterMode::Linear,
+                min_filter: FilterMode::Linear,
+                ..Default::default()
+            }),
+        }
+    }
+
+    pub(crate) fn get(&self, filter: FilterMode) -> &wgpu::Sampler {
+        match filter {
+            FilterMode::Nearest => &self.nearest,
+            FilterMode::Linear => &self.linear,
+        }
+    }
+}
 
 /// Handle to a texture uploaded to the GPU.
 ///
 /// Wraps a [`wgpu::Texture`] and its view plus the bind group used by the
 /// sprite pipeline. Internal fields are never exposed to the game.
+#[derive(Clone)]
 pub struct Texture2D {
     _texture: wgpu::Texture,
     bind_group: BindGroup,
@@ -11,13 +47,13 @@ pub struct Texture2D {
 }
 
 impl Texture2D {
-    /// Uploads RGBA8 pixel data as a new texture and pre-binds it against the
-    /// sprite pipeline's texture layout (group 1).
-    pub fn from_rgba8(
+    /// Uploads RGBA8 pixel data as a new texture sampled through `sampler`,
+    /// pre-bound against the sprite pipeline's texture layout (group 1).
+    pub(crate) fn from_rgba8(
         device: &Device,
         queue: &Queue,
         layout: &BindGroupLayout,
-        sampler: &Sampler,
+        sampler: &wgpu::Sampler,
         width: u32,
         height: u32,
         rgba: &[u8],
@@ -76,5 +112,42 @@ impl Texture2D {
 
     pub(crate) fn size(&self) -> (u32, u32) {
         self.size
+    }
+}
+
+/// Decodes an image file from disk into raw RGBA8 pixels (ADR-0008).
+///
+/// Panics with the path in the message when the file is missing or not a
+/// decodable image; the synchronous API has no error channel yet.
+pub(crate) fn decode_image_file(path: &str) -> (u32, u32, Vec<u8>) {
+    let img = image::open(path)
+        .unwrap_or_else(|err| panic!("pet2d: failed to load texture '{path}': {err}"))
+        .to_rgba8();
+    let (width, height) = img.dimensions();
+    (width, height, img.into_raw())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn png_from_disk_decodes_to_rgba_with_transparency() {
+        // 2x1: left opaque green, right fully transparent
+        let png = image::RgbaImage::from_raw(2, 1, vec![0, 255, 0, 255, 0, 0, 0, 0]).unwrap();
+        let path = std::env::temp_dir().join(format!("pet2d-test-{}.png", std::process::id()));
+        png.save(&path).expect("failed to write test PNG");
+
+        let (width, height, rgba) = decode_image_file(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(rgba, vec![0, 255, 0, 255, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "pet2d: failed to load texture")]
+    fn missing_file_panics_naming_the_path() {
+        decode_image_file("definitely/not/here.png");
     }
 }

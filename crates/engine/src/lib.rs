@@ -1,5 +1,6 @@
+mod assets;
 mod camera;
-pub mod color;
+mod color;
 mod context;
 pub mod draw;
 pub mod keycode;
@@ -7,10 +8,12 @@ mod math;
 pub mod mouse;
 pub mod window;
 
-pub use camera::{set_camera, set_default_camera, Camera2D};
+pub use assets::load_texture;
+pub use camera::{Camera2D, set_camera, set_default_camera};
 pub use color::Color;
-pub use draw::{clear_background, draw_texture};
+pub use draw::{clear_background, draw_texture, draw_texture_ex};
 pub use graphics::Texture2D;
+pub use graphics::{DrawTextureParams, Rect};
 pub use keycode::KeyCode;
 pub use math::{Mat4, Vec2};
 pub use mouse::MouseButton;

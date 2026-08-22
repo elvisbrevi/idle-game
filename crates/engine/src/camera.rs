@@ -29,14 +29,16 @@ impl Camera2D {
         let scale_y = self.zoom.y * 2.0 / screen_height;
         let (sin, cos) = self.rotation.sin_cos();
 
-        // column-major columns; wgpu NDC has y pointing down like world space
+        // column-major columns. World space is y-down (origin top-left);
+        // clip space is y-up on every backend wgpu supports, so the y axis
+        // flips here once — sprites stay upright without per-draw fixes.
         Mat4::from_cols_array_2d(&[
-            [scale_x * cos, scale_y * sin, 0.0, 0.0],
-            [-scale_x * sin, scale_y * cos, 0.0, 0.0],
+            [scale_x * cos, -scale_y * sin, 0.0, 0.0],
+            [-scale_x * sin, -scale_y * cos, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.0],
             [
                 -scale_x * (cos * self.position.x - sin * self.position.y) - 1.0,
-                -scale_y * (sin * self.position.x + cos * self.position.y) - 1.0,
+                scale_y * (sin * self.position.x + cos * self.position.y) + 1.0,
                 0.0,
                 1.0,
             ],
@@ -73,16 +75,23 @@ mod tests {
     #[test]
     fn default_camera_maps_screen_pixels_one_to_one() {
         let camera = Camera2D::default();
-        assert_eq!(project(&camera, (800.0, 600.0), (0.0, 0.0)), (-1.0, -1.0));
-        assert_eq!(project(&camera, (800.0, 600.0), (800.0, 600.0)), (1.0, 1.0));
+        // world origin is the top-left corner; clip space y is up
+        assert_eq!(project(&camera, (800.0, 600.0), (0.0, 0.0)), (-1.0, 1.0));
+        assert_eq!(
+            project(&camera, (800.0, 600.0), (800.0, 600.0)),
+            (1.0, -1.0)
+        );
         assert_eq!(project(&camera, (800.0, 600.0), (400.0, 300.0)), (0.0, 0.0));
     }
 
     #[test]
     fn default_camera_matches_any_window_size() {
         let camera = Camera2D::default();
-        assert_eq!(project(&camera, (1920.0, 1080.0), (0.0, 0.0)), (-1.0, -1.0));
-        assert_eq!(project(&camera, (1920.0, 1080.0), (960.0, 540.0)), (0.0, 0.0));
+        assert_eq!(project(&camera, (1920.0, 1080.0), (0.0, 0.0)), (-1.0, 1.0));
+        assert_eq!(
+            project(&camera, (1920.0, 1080.0), (960.0, 540.0)),
+            (0.0, 0.0)
+        );
     }
 
     #[test]
@@ -91,7 +100,10 @@ mod tests {
             zoom: Vec2::new(2.0, 2.0),
             ..Default::default()
         };
-        assert_eq!(project(&camera, (800.0, 600.0), (400.0, 300.0)), (1.0, 1.0));
+        assert_eq!(
+            project(&camera, (800.0, 600.0), (400.0, 300.0)),
+            (1.0, -1.0)
+        );
     }
 
     #[test]
@@ -100,10 +112,16 @@ mod tests {
             position: Vec2::new(400.0, 300.0),
             ..Default::default()
         };
-        assert_eq!(project(&camera, (800.0, 600.0), (400.0, 300.0)), (-1.0, -1.0));
+        assert_eq!(
+            project(&camera, (800.0, 600.0), (400.0, 300.0)),
+            (-1.0, 1.0)
+        );
         // the visible window shifted right by half a screen width
-        assert_eq!(project(&camera, (800.0, 600.0), (800.0, 300.0)), (0.0, -1.0));
-        assert_eq!(project(&camera, (800.0, 600.0), (1200.0, 300.0)), (1.0, -1.0));
+        assert_eq!(project(&camera, (800.0, 600.0), (800.0, 300.0)), (0.0, 1.0));
+        assert_eq!(
+            project(&camera, (800.0, 600.0), (1200.0, 300.0)),
+            (1.0, 1.0)
+        );
     }
 
     #[test]
@@ -112,7 +130,8 @@ mod tests {
             rotation: std::f32::consts::FRAC_PI_2,
             ..Default::default()
         };
-        // +x world rotates onto +y world; half screen height maps to NDC 0
+        // +x world rotates onto +y world (down on screen); half screen height
+        // maps to NDC 0
         let (x, y) = project(&camera, (800.0, 600.0), (300.0, 0.0));
         assert!((x - (-1.0)).abs() < 1e-6, "x was {x}");
         assert!(y.abs() < 1e-6, "y was {y}");
