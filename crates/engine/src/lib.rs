@@ -70,7 +70,7 @@ where
     // hand-rolled executor — no async runtime involved
     let future: RefCell<Option<Pin<Box<dyn Future<Output = ()>>>>> = RefCell::new(None);
 
-    let handler = move |event: platform::FrameEvent| {
+    let handler = move |event: platform::FrameEvent| -> bool {
         match event {
             platform::FrameEvent::WindowReady(handle, width, height) => {
                 // graphics clamps degenerate sizes before configuring the surface
@@ -84,9 +84,11 @@ where
                     .take()
                     .expect("pet2d: game closure consumed twice")(
                 )));
+                true
             }
             platform::FrameEvent::Resized(width, height) => {
                 context::with_mut(|ctx| ctx.resize(width, height));
+                true
             }
             platform::FrameEvent::Redraw => {
                 context::with_mut(|ctx| ctx.time.update());
@@ -114,6 +116,9 @@ where
                     // this one; drop the one-frame ones before the next tick
                     ctx.input.begin_frame();
                 });
+                // keep running while the game future lives; its completion
+                // ends the loop so run() returns
+                future.borrow().is_some()
             }
             platform::FrameEvent::KeyboardInput(native_key, state) => {
                 context::with_mut(|ctx| {
@@ -121,6 +126,7 @@ where
                         ctx.input.on_key(key, state);
                     }
                 });
+                true
             }
             platform::FrameEvent::MouseInput(native_button, state) => {
                 context::with_mut(|ctx| {
@@ -128,9 +134,11 @@ where
                         ctx.input.on_mouse_button(button, state);
                     }
                 });
+                true
             }
             platform::FrameEvent::CursorMoved(x, y) => {
                 context::with_mut(|ctx| ctx.input.on_cursor_moved(x, y));
+                true
             }
         }
     };

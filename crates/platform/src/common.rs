@@ -78,17 +78,19 @@ pub enum FrameEvent {
     MouseInput(crate::NativeMouseButton, crate::ElementState),
 }
 
-struct App<F: FnMut(FrameEvent)> {
+struct App<F: FnMut(FrameEvent) -> bool> {
     title: String,
     width: u32,
     height: u32,
     #[cfg(feature = "desktop-pet")]
     pet: Option<PetWindowOptions>,
     window: Option<Arc<Window>>,
+    /// Frame sink; returns false to end the event loop (the engine uses this
+    /// when the game closure completes).
     frame_handler: F,
 }
 
-impl<F: FnMut(FrameEvent)> ApplicationHandler for App<F> {
+impl<F: FnMut(FrameEvent) -> bool> ApplicationHandler for App<F> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -120,7 +122,10 @@ impl<F: FnMut(FrameEvent)> ApplicationHandler for App<F> {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
-                (self.frame_handler)(FrameEvent::Redraw);
+                if !(self.frame_handler)(FrameEvent::Redraw) {
+                    event_loop.exit();
+                    return;
+                }
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
@@ -162,7 +167,16 @@ impl<F: FnMut(FrameEvent)> ApplicationHandler for App<F> {
     fn memory_warning(&mut self, _event_loop: &ActiveEventLoop) {}
 }
 
-impl<F: FnMut(FrameEvent)> App<F> {
+impl<F: FnMut(FrameEvent) -> bool> App<F> {
+    /// Applies the base window attributes; without the desktop-pet feature
+    /// every window is a normal application window.
+    #[cfg(not(feature = "desktop-pet"))]
+    fn build_attributes(&self) -> WindowAttributes {
+        WindowAttributes::default()
+            .with_title(&self.title)
+            .with_inner_size(winit::dpi::LogicalSize::new(self.width, self.height))
+    }
+
     /// Applies the desktop pet settings to the base window attributes
     /// (transparent, borderless, topmost) plus the platform refinements of
     /// [`crate::macos`] / [`crate::windows`] (ADR-0007).
@@ -205,12 +219,16 @@ fn refine_pet_attributes(attrs: WindowAttributes) -> WindowAttributes {
     attrs
 }
 
+/// Creates the window and runs the Winit event loop until it ends: either
+/// the frame handler returns `false` (the engine signals this when the game
+/// closure completes) or the user closes the window. Must be called from the
+/// main thread on macOS.
 pub fn run(
     title: &str,
     width: u32,
     height: u32,
     #[cfg(feature = "desktop-pet")] pet: Option<PetWindowOptions>,
-    frame_handler: impl FnMut(FrameEvent) + 'static,
+    frame_handler: impl FnMut(FrameEvent) -> bool + 'static,
 ) {
     let event_loop = EventLoop::new().unwrap();
     let mut app = App {
