@@ -3,6 +3,12 @@ name = "engine"
 version = "0.1.0"
 edition = "2024"
 
+# Winit needs the event loop on the main thread (macOS) and libtest always
+# spawns test threads, so the API integration tests run as a plain binary
+[[test]]
+name = "api"
+harness = false
+
 [[example]]
 name = "basic"
 path = "../../examples/basic/main.rs"
