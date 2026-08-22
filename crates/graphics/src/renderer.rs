@@ -38,8 +38,9 @@ pub struct Renderer {
     vertex_buffer: wgpu::Buffer,
     vertex_capacity_bytes: u64,
     index_buffer: wgpu::Buffer,
-    // ponytail: scene persists across redraws because the game closure runs
-    // once today; reset per frame once next_frame() lands and drives a loop
+    // NOTE: deliberate simplification — the quad list persists across redraws
+    // because the game closure runs once today; it resets per frame once
+    // next_frame() lands and drives a real loop (sprite batching ticket)
     quads: Vec<PendingQuad>,
     camera_matrix: [[f32; 4]; 4],
 }
@@ -69,7 +70,7 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let pipeline = pipeline::create_pipeline(&device, config.format);
-        let texture_layout = pipeline.get_bind_group_layout(1);
+        let texture_layout = pipeline.get_bind_group_layout(pipeline::TEXTURE_GROUP);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("pet2d-sampler"),
             // nearest keeps pixel art crisp; configurable filtering comes with
@@ -87,7 +88,7 @@ impl Renderer {
         });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("pet2d-camera-bind-group"),
-            layout: &pipeline.get_bind_group_layout(0),
+            layout: &pipeline.get_bind_group_layout(pipeline::CAMERA_GROUP),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera_uniform.as_entire_binding(),
@@ -218,6 +219,10 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_bind_group(pipeline::CAMERA_GROUP, &self.camera_bind_group, &[]);
+            self.queue
+                .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&self.camera_matrix));
+
             if !self.quads.is_empty() {
                 let needed_bytes = self.quads.len() as u64 * QUAD_BYTES;
                 if needed_bytes > self.vertex_capacity_bytes {
@@ -238,17 +243,16 @@ impl Renderer {
                     0,
                     bytemuck::cast_slice(&vertices),
                 );
-                self.queue
-                    .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&self.camera_matrix));
 
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 render_pass.set_index_buffer(
                     self.index_buffer.slice(..),
                     wgpu::IndexFormat::Uint32,
                 );
+                // one draw per texture group; SpriteBatch (texture loading
+                // ticket) collapses same-texture runs into single draw calls
                 for (i, quad) in self.quads.iter().enumerate() {
-                    render_pass.set_bind_group(1, &quad.bind_group, &[]);
+                    render_pass.set_bind_group(pipeline::TEXTURE_GROUP, &quad.bind_group, &[]);
                     render_pass.draw_indexed(0..6, (i * 4) as i32, 0..1);
                 }
             }

@@ -1,7 +1,14 @@
-// Sprite pipeline: one textured quad per draw call, transformed by the
-// Camera2D projection uniform. Group 0 carries the camera matrix; group 1
-// binds the texture and its sampler. Alpha blending composes transparent
-// sprites over whatever was drawn (or cleared) before.
+// Sprite pipeline: quads transformed by the Camera2D projection uniform.
+// Group 0 carries the camera matrix; group 1 binds the texture and its
+// sampler. Alpha blending composes transparent sprites over whatever was
+// drawn (or cleared) before. One draw call per queued quad until SpriteBatch
+// arrives with texture loading.
+
+/// Bind group index of the camera uniform in the sprite pipeline.
+pub(crate) const CAMERA_GROUP: u32 = 0;
+/// Bind group index of the texture + sampler pair in the sprite pipeline.
+pub(crate) const TEXTURE_GROUP: u32 = 1;
+
 const SHADER: &str = r#"
 @group(0) @binding(0) var<uniform> camera: mat4x4<f32>;
 @group(1) @binding(0) var t_sampler: sampler;

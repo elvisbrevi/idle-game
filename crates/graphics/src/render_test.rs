@@ -17,7 +17,7 @@ use wgpu::{
     RenderPassDescriptor, RequestAdapterOptions, StoreOp, TextureFormat, TextureUsages,
 };
 
-use crate::pipeline;
+use crate::pipeline::{self, CAMERA_GROUP, TEXTURE_GROUP};
 use crate::sprite::{quad_vertices, QUAD_INDICES};
 use crate::texture::Texture2D;
 
@@ -74,8 +74,8 @@ fn textured_quad_renders_with_alpha_blending() {
     let (device, queue) = headless_device();
 
     let pipeline = pipeline::create_pipeline(&device, TextureFormat::Rgba8Unorm);
-    let camera_layout = pipeline.get_bind_group_layout(0);
-    let texture_layout = pipeline.get_bind_group_layout(1);
+    let camera_layout = pipeline.get_bind_group_layout(CAMERA_GROUP);
+    let texture_layout = pipeline.get_bind_group_layout(TEXTURE_GROUP);
 
     // 2x1 texture: left texel opaque green, right texel fully transparent
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -166,8 +166,8 @@ fn textured_quad_renders_with_alpha_blending() {
             occlusion_query_set: None,
         });
         pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, &camera_group, &[]);
-        pass.set_bind_group(1, texture.bind_group(), &[]);
+        pass.set_bind_group(CAMERA_GROUP, &camera_group, &[]);
+        pass.set_bind_group(TEXTURE_GROUP, texture.bind_group(), &[]);
         pass.set_vertex_buffer(0, vertex_buf.slice(..));
         pass.set_index_buffer(index_buf.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..QUAD_INDICES.len() as u32, 0, 0..1);
