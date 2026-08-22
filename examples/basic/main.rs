@@ -1,4 +1,4 @@
-use engine::{WindowConfig, clear_background, run, Color};
+use engine::{Color, WindowConfig, clear_background, run};
 
 fn main() {
     let config = WindowConfig::default();

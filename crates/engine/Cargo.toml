@@ -11,6 +11,10 @@ path = "../../examples/basic/main.rs"
 name = "sprite"
 path = "../../examples/sprite/main.rs"
 
+[[example]]
+name = "input"
+path = "../../examples/input/main.rs"
+
 [dependencies]
 platform = { path = "../platform" }
 graphics = { path = "../graphics" }
