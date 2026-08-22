@@ -3,6 +3,7 @@ mod camera;
 mod color;
 mod context;
 pub mod draw;
+mod input;
 pub mod keycode;
 mod math;
 pub mod mouse;
@@ -14,6 +15,7 @@ pub use color::Color;
 pub use draw::{clear_background, draw_texture, draw_texture_ex};
 pub use graphics::Texture2D;
 pub use graphics::{DrawTextureParams, Rect};
+pub use input::{InputState, is_key_down, is_key_pressed, is_mouse_button_down, mouse_position};
 pub use keycode::KeyCode;
 pub use math::{Mat4, Vec2};
 pub use mouse::MouseButton;
@@ -48,7 +50,27 @@ pub fn run(config: WindowConfig, game_fn: impl FnOnce() + 'static) {
                     let projection = ctx.camera.projection_matrix(ctx.width, ctx.height);
                     ctx.renderer.set_camera(projection.to_cols_array_2d());
                     ctx.renderer.render(ctx.clear_color.to_rgba());
+                    // events accumulated since the last frame were visible to
+                    // this one; drop the one-frame ones before the next tick
+                    ctx.input.begin_frame();
                 });
+            }
+            platform::FrameEvent::KeyboardInput(native_key, state) => {
+                context::with_mut(|ctx| {
+                    if let Some(key) = keycode::KeyCode::from_native(native_key) {
+                        ctx.input.on_key(key, state);
+                    }
+                });
+            }
+            platform::FrameEvent::MouseInput(native_button, state) => {
+                context::with_mut(|ctx| {
+                    if let Some(button) = mouse::MouseButton::from_native(native_button) {
+                        ctx.input.on_mouse_button(button, state);
+                    }
+                });
+            }
+            platform::FrameEvent::CursorMoved(x, y) => {
+                context::with_mut(|ctx| ctx.input.on_cursor_moved(x, y));
             }
         },
     );

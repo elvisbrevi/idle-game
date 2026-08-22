@@ -2,8 +2,10 @@ use std::sync::Arc;
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
+pub use winit::event::{ElementState, MouseButton as NativeMouseButton};
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+pub use winit::keyboard::KeyCode as NativeKeyCode;
 use winit::window::{Window, WindowAttributes};
 
 #[derive(Clone)]
@@ -23,7 +25,9 @@ impl WindowHandle {
 }
 
 impl HasWindowHandle for WindowHandle {
-    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
         self.inner.window_handle()
     }
 }
@@ -40,6 +44,9 @@ pub enum FrameEvent {
     WindowReady(WindowHandle, u32, u32),
     Resized(u32, u32),
     Redraw,
+    KeyboardInput(NativeKeyCode, ElementState),
+    CursorMoved(f32, f32),
+    MouseInput(NativeMouseButton, ElementState),
 }
 
 struct App<F: FnMut(FrameEvent)> {
@@ -95,6 +102,21 @@ impl<F: FnMut(FrameEvent)> ApplicationHandler for App<F> {
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                // identified physical keys only; unnamed keys have no mapping
+                if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
+                    (self.frame_handler)(FrameEvent::KeyboardInput(code, event.state));
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                (self.frame_handler)(FrameEvent::CursorMoved(
+                    position.x as f32,
+                    position.y as f32,
+                ));
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                (self.frame_handler)(FrameEvent::MouseInput(button, state));
             }
             _ => {}
         }
