@@ -29,11 +29,11 @@ pub use color::Color;
 pub use draw::{clear_background, draw_circle, draw_rectangle, draw_texture, draw_texture_ex};
 pub use error::EngineError;
 pub use frame::{NextFrame, next_frame};
+pub use graphics::DrawTextureParams;
 pub use graphics::Texture2D;
-pub use graphics::{DrawTextureParams, Rect};
 pub use input::{InputState, is_key_down, is_key_pressed, is_mouse_button_down, mouse_position};
 pub use keycode::KeyCode;
-pub use math::{Mat4, Vec2, Vec3};
+pub use math::{Mat4, Rect, Vec2, Vec3};
 pub use mouse::MouseButton;
 pub use time::{TimeState, get_fps, get_frame_time, get_time};
 pub use window::{WindowConfig, screen_height, screen_width, set_window_position, set_window_size};
@@ -78,20 +78,18 @@ where
                 *future.borrow_mut() = Some(Box::pin(game
                     .borrow_mut()
                     .take()
-                    .expect("game consumed twice")(
+                    .expect("pet2d: game closure consumed twice")(
                 )));
             }
             platform::FrameEvent::Resized(width, height) => {
-                context::with_mut(|ctx| {
-                    ctx.width = width as f32;
-                    ctx.height = height as f32;
-                    ctx.renderer.resize(width, height);
-                });
+                context::with_mut(|ctx| ctx.resize(width, height));
             }
             platform::FrameEvent::Redraw => {
                 context::with_mut(|ctx| ctx.time.update());
 
-                // drive the game until it yields at next_frame() or ends
+                // drive the game until it yields at next_frame() or ends; the
+                // future is re-polled on every redraw (ADR-0003), so no waker
+                // needs arming
                 {
                     let mut slot = future.borrow_mut();
                     if let Some(active) = slot.as_mut() {
@@ -108,9 +106,6 @@ where
                     ctx.renderer.set_camera(projection.to_cols_array_2d());
                     ctx.renderer.render(ctx.clear_color.to_rgba());
                     ctx.frame += 1;
-                    if let Some(waker) = ctx.frame_waker.take() {
-                        waker.wake();
-                    }
                     // events accumulated since the last frame were visible to
                     // this one; drop the one-frame ones before the next tick
                     ctx.input.begin_frame();

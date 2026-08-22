@@ -52,9 +52,7 @@ pub fn set_window_size(width: f32, height: f32) {
         // the OS confirms async via a Resized event with the same values on
         // every supported backend; apply locally so reads are consistent now
         ctx.window.set_inner_size(width, height);
-        ctx.width = width as f32;
-        ctx.height = height as f32;
-        ctx.renderer.resize(width, height);
+        ctx.resize(width, height);
     });
 }
 

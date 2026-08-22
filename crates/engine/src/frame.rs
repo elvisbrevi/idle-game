@@ -28,6 +28,10 @@ pub fn next_frame() -> NextFrame {
 
 /// Future returned by [`next_frame`]: resolves on the first presented frame
 /// after it was created, however many times the executor polls it.
+///
+/// It never arms a waker: per ADR-0003 the engine re-polls the game future
+/// unconditionally on every rendered frame, so readiness is driven purely by
+/// the frame counter comparison.
 pub struct NextFrame {
     /// Presented-frame count this future resolves on, captured on first poll.
     target_frame: Option<u64>,
@@ -36,13 +40,10 @@ pub struct NextFrame {
 impl Future for NextFrame {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
+    fn poll(self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<()> {
         let this = self.get_mut();
-        context::with_mut(|ctx| {
+        context::with(|ctx| {
             let target = *this.target_frame.get_or_insert_with(|| ctx.frame + 1);
-            // the executor re-polls every rendered frame; the waker keeps the
-            // future contract honest by firing as soon as the target lands
-            ctx.frame_waker = Some(cx.waker().clone());
             if ctx.frame >= target {
                 Poll::Ready(())
             } else {

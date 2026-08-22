@@ -24,13 +24,14 @@ impl WindowHandle {
     }
 
     /// Resizes the window in physical pixels, matching what `inner_size()`
-    /// reports. Returns the applied size; `None` on Wayland-like backends
-    /// that only confirm asynchronously.
-    pub fn set_inner_size(&self, width: u32, height: u32) -> Option<(u32, u32)> {
-        let size = self
+    /// reports. Applied synchronously on macOS and Windows; Wayland-like
+    /// backends (out of scope) only confirm via a later resize event.
+    pub fn set_inner_size(&self, width: u32, height: u32) {
+        let applied = self
             .inner
-            .request_inner_size(winit::dpi::PhysicalSize::new(width.max(1), height.max(1)))?;
-        Some((size.width, size.height))
+            .request_inner_size(winit::dpi::PhysicalSize::new(width.max(1), height.max(1)));
+        // backends that apply immediately report the same size back
+        debug_assert!(applied.is_none_or(|s| (s.width, s.height) == (width.max(1), height.max(1))));
     }
 
     /// Moves the window's top-left corner to physical screen coordinates.

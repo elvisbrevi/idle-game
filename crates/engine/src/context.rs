@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::task::Waker;
 
 use crate::assets::AssetServer;
 use crate::camera::Camera2D;
@@ -21,9 +20,6 @@ pub(crate) struct Context {
     pub(crate) window: platform::WindowHandle,
     /// Number of frames presented so far; drives [`crate::next_frame`].
     pub(crate) frame: u64,
-    /// Waker of the [`crate::next_frame`] future currently waiting on the
-    /// next presented frame.
-    pub(crate) frame_waker: Option<Waker>,
 }
 
 thread_local! {
@@ -49,9 +45,17 @@ pub(crate) fn init(
             time: TimeState::default(),
             window,
             frame: 0,
-            frame_waker: None,
         });
     });
+}
+
+impl Context {
+    /// Applies a new pixel size to the cached dimensions and render surface.
+    pub(crate) fn resize(&mut self, width: u32, height: u32) {
+        self.width = width as f32;
+        self.height = height as f32;
+        self.renderer.resize(width, height);
+    }
 }
 
 pub(crate) fn with<R>(f: impl FnOnce(&Context) -> R) -> R {
