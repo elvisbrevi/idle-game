@@ -23,14 +23,10 @@ pub fn run(config: WindowConfig, game_fn: impl FnOnce() + 'static) {
         game_fn,
         move |event| match event {
             platform::FrameEvent::WindowReady(handle, width, height) => {
-                let renderer = graphics::Renderer::new(handle, (width.max(1), height.max(1)))
+                // graphics clamps degenerate sizes before configuring the surface
+                let renderer = graphics::Renderer::new(handle, (width, height))
                     .expect("pet2d: failed to initialize renderer");
-                context::init(
-                    renderer,
-                    background,
-                    width as f32,
-                    height as f32,
-                );
+                context::init(renderer, background, width as f32, height as f32);
             }
             platform::FrameEvent::Resized(width, height) => {
                 context::with_mut(|ctx| {

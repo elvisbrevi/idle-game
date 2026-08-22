@@ -1,3 +1,6 @@
+// Sprite pipeline skeleton: wired into every render pass so the format and
+// blending are validated up front. Quads arrive in the sprite-batching phase;
+// until then the pass draws no vertices and only LoadOp::Clear paints.
 const SHADER: &str = r#"
 struct VsOutput {
     @builtin(position) position: vec4<f32>,

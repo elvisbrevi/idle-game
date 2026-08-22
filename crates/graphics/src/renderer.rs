@@ -148,7 +148,9 @@ fn choose_alpha_mode(modes: &[CompositeAlphaMode]) -> CompositeAlphaMode {
     }
 }
 
-// ADR-0003: poll-based bridge without an external runtime.
+// Minimal std-only executor to block on wgpu's async initialization from
+// inside the sync event loop. The poll-based frame bridge (ADR-0003)
+// lands together with next_frame().
 fn block_on<F: Future>(future: F) -> F::Output {
     struct ThreadWaker(Thread);
 
