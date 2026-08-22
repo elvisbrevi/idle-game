@@ -110,7 +110,9 @@ impl Texture2D {
         &self.bind_group
     }
 
-    pub(crate) fn size(&self) -> (u32, u32) {
+    /// Pixel dimensions `(width, height)` of the uploaded texture; spritesheet
+    /// math needs them to slice the grid into frames.
+    pub fn size(&self) -> (u32, u32) {
         self.size
     }
 }

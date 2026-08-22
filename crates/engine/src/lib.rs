@@ -15,6 +15,7 @@ mod input;
 pub mod keycode;
 mod math;
 pub mod mouse;
+pub mod spritesheet;
 mod time;
 pub mod window;
 
@@ -35,6 +36,7 @@ pub use input::{InputState, is_key_down, is_key_pressed, is_mouse_button_down, m
 pub use keycode::KeyCode;
 pub use math::{Mat4, Rect, Vec2, Vec3};
 pub use mouse::MouseButton;
+pub use spritesheet::{Animation, SpriteSheet};
 pub use time::{TimeState, get_fps, get_frame_time, get_time};
 pub use window::{WindowConfig, screen_height, screen_width, set_window_position, set_window_size};
 

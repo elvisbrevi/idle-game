@@ -12,6 +12,10 @@ name = "sprite"
 path = "../../examples/sprite/main.rs"
 
 [[example]]
+name = "animation"
+path = "../../examples/animation/main.rs"
+
+[[example]]
 name = "input"
 path = "../../examples/input/main.rs"
 
