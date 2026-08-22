@@ -1,10 +1,12 @@
 use std::cell::RefCell;
 
+use crate::assets::AssetServer;
 use crate::camera::Camera2D;
 use crate::color::Color;
 
 pub(crate) struct Context {
     pub(crate) renderer: graphics::Renderer,
+    pub(crate) assets: AssetServer<graphics::Texture2D>,
     pub(crate) clear_color: Color,
     pub(crate) width: f32,
     pub(crate) height: f32,
@@ -15,15 +17,11 @@ thread_local! {
     static CONTEXT: RefCell<Option<Context>> = const { RefCell::new(None) };
 }
 
-pub(crate) fn init(
-    renderer: graphics::Renderer,
-    clear_color: Color,
-    width: f32,
-    height: f32,
-) {
+pub(crate) fn init(renderer: graphics::Renderer, clear_color: Color, width: f32, height: f32) {
     CONTEXT.with(|cell| {
         *cell.borrow_mut() = Some(Context {
             renderer,
+            assets: AssetServer::default(),
             clear_color,
             width,
             height,

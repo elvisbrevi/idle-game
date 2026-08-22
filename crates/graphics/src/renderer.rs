@@ -11,17 +11,36 @@ use wgpu::{
     SurfaceError, SurfaceTarget, TextureUsages, WindowHandle,
 };
 
+use crate::batch::SpriteBatch;
 use crate::pipeline;
-use crate::sprite::{quad_vertices, SpriteVertex, QUAD_INDICES};
-use crate::texture::Texture2D;
-
-struct PendingQuad {
-    vertices: [SpriteVertex; 4],
-    bind_group: wgpu::BindGroup,
-}
+use crate::sprite::{DrawTextureParams, QUAD_INDICES, SpriteVertex, sprite_quad};
+use crate::texture::{Samplers, Texture2D, decode_image_file};
 
 const CAMERA_UNIFORM_SIZE: u64 = std::mem::size_of::<[[f32; 4]; 4]>() as u64;
-const QUAD_BYTES: u64 = std::mem::size_of::<[SpriteVertex; 4]>() as u64;
+const VERTEX_BYTES: u64 = std::mem::size_of::<SpriteVertex>() as u64;
+const INDEX_BYTES: u64 = std::mem::size_of::<u32>() as u64;
+
+/// Recreates `buffer` at double capacity when `needed_bytes` no longer fits.
+fn grow_buffer(
+    device: &Device,
+    buffer: &wgpu::Buffer,
+    capacity_bytes: u64,
+    needed_bytes: u64,
+    label: &str,
+    usage: wgpu::BufferUsages,
+) -> (wgpu::Buffer, u64) {
+    if needed_bytes <= capacity_bytes {
+        return (buffer.clone(), capacity_bytes);
+    }
+    let size = needed_bytes.max(capacity_bytes * 2);
+    let grown = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size,
+        usage,
+        mapped_at_creation: false,
+    });
+    (grown, size)
+}
 
 pub struct Renderer {
     _instance: Instance,
@@ -32,30 +51,33 @@ pub struct Renderer {
     config: SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
+    samplers: Samplers,
     camera_uniform: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     vertex_buffer: wgpu::Buffer,
     vertex_capacity_bytes: u64,
     index_buffer: wgpu::Buffer,
-    // NOTE: deliberate simplification — the quad list persists across redraws
+    index_capacity_bytes: u64,
+    // NOTE: deliberate simplification — the batch persists across redraws
     // because the game closure runs once today; it resets per frame once
-    // next_frame() lands and drives a real loop (sprite batching ticket)
-    quads: Vec<PendingQuad>,
+    // next_frame() lands and drives a real loop
+    batch: SpriteBatch<wgpu::BindGroup>,
     camera_matrix: [[f32; 4]; 4],
 }
 
 impl Renderer {
-    pub fn new(window: impl WindowHandle + 'static, size: (u32, u32)) -> Result<Self, crate::GraphicsError> {
+    pub fn new(
+        window: impl WindowHandle + 'static,
+        size: (u32, u32),
+    ) -> Result<Self, crate::GraphicsError> {
         let instance = Instance::new(&InstanceDescriptor::default());
         let surface = instance.create_surface(SurfaceTarget::from(window))?;
 
-        let adapter =
-            block_on(instance.request_adapter(&RequestAdapterOptions {
-                compatible_surface: Some(&surface),
-                ..Default::default()
-            }))
-            .ok_or(crate::GraphicsError::NoAdapter)?;
+        let adapter = block_on(instance.request_adapter(&RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        }))
+        .ok_or(crate::GraphicsError::NoAdapter)?;
 
         let device_descriptor = DeviceDescriptor {
             label: Some("pet2d-device"),
@@ -71,14 +93,7 @@ impl Renderer {
 
         let pipeline = pipeline::create_pipeline(&device, config.format);
         let texture_layout = pipeline.get_bind_group_layout(pipeline::TEXTURE_GROUP);
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("pet2d-sampler"),
-            // nearest keeps pixel art crisp; configurable filtering comes with
-            // texture loading
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
+        let samplers = Samplers::new(&device);
 
         let camera_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("pet2d-camera-uniform"),
@@ -119,13 +134,14 @@ impl Renderer {
             config,
             pipeline,
             texture_layout,
-            sampler,
+            samplers,
             camera_uniform,
             camera_bind_group,
             vertex_buffer,
             vertex_capacity_bytes: 0,
             index_buffer,
-            quads: Vec::new(),
+            index_capacity_bytes: std::mem::size_of_val(&QUAD_INDICES) as u64,
+            batch: SpriteBatch::new(),
             camera_matrix: [
                 [1.0, 0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0, 0.0],
@@ -135,27 +151,57 @@ impl Renderer {
         })
     }
 
-    /// Uploads RGBA8 data as a new GPU texture bound to the sprite pipeline.
+    /// Uploads RGBA8 data as a new GPU texture bound to the sprite pipeline,
+    /// sampled with nearest filtering (pixel-art default).
     pub fn create_texture(&self, width: u32, height: u32, rgba: &[u8]) -> Texture2D {
+        self.create_texture_filtered(wgpu::FilterMode::Nearest, width, height, rgba)
+    }
+
+    /// Like [`Renderer::create_texture`] with an explicit filter mode.
+    pub fn create_texture_filtered(
+        &self,
+        filter: wgpu::FilterMode,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Texture2D {
         Texture2D::from_rgba8(
             &self.device,
             &self.queue,
             &self.texture_layout,
-            &self.sampler,
+            self.samplers.get(filter),
             width,
             height,
             rgba,
         )
     }
 
+    /// Decodes an image file from disk and uploads it as a GPU texture
+    /// (ADR-0008). Synchronous; panics if the file cannot be loaded.
+    pub fn load_texture(&self, path: &str) -> Texture2D {
+        let (width, height, rgba) = decode_image_file(path);
+        self.create_texture(width, height, &rgba)
+    }
+
     /// Queues a textured quad with its top-left corner at (x, y), sized to the
     /// texture dimensions in pixels.
     pub fn draw_texture(&mut self, texture: &Texture2D, x: f32, y: f32) {
+        self.draw_texture_ex(texture, x, y, DrawTextureParams::default());
+    }
+
+    /// Queues a textured quad with per-draw tweaks: source rect, destination
+    /// size, rotation, pivot, flips and tint.
+    pub fn draw_texture_ex(
+        &mut self,
+        texture: &Texture2D,
+        x: f32,
+        y: f32,
+        params: DrawTextureParams,
+    ) {
         let (width, height) = texture.size();
-        self.quads.push(PendingQuad {
-            vertices: quad_vertices(x, y, width as f32, height as f32),
-            bind_group: texture.bind_group().clone(),
-        });
+        let vertices = sprite_quad((width as f32, height as f32), x, y, &params);
+        self.batch
+            .push_quad(texture.bind_group().clone(), &vertices);
     }
 
     /// Sets the projection applied to every queued quad on the next render.
@@ -220,40 +266,54 @@ impl Renderer {
             });
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(pipeline::CAMERA_GROUP, &self.camera_bind_group, &[]);
-            self.queue
-                .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&self.camera_matrix));
+            self.queue.write_buffer(
+                &self.camera_uniform,
+                0,
+                bytemuck::bytes_of(&self.camera_matrix),
+            );
 
-            if !self.quads.is_empty() {
-                let needed_bytes = self.quads.len() as u64 * QUAD_BYTES;
-                if needed_bytes > self.vertex_capacity_bytes {
-                    self.vertex_capacity_bytes = needed_bytes.max(self.vertex_capacity_bytes * 2);
-                    self.vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("pet2d-vertex-buffer"),
-                        size: self.vertex_capacity_bytes,
-                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
-                }
-                let mut vertices = Vec::with_capacity(self.quads.len() * 4);
-                for quad in &self.quads {
-                    vertices.extend_from_slice(&quad.vertices);
-                }
+            if !self.batch.is_empty() {
+                // ADR-0005: the batch uploads once per render, one write_buffer
+                // per buffer, then one draw_indexed per texture run
+                let (vertex_buffer, vertex_capacity) = grow_buffer(
+                    &self.device,
+                    &self.vertex_buffer,
+                    self.vertex_capacity_bytes,
+                    self.batch.vertices.len() as u64 * VERTEX_BYTES,
+                    "pet2d-vertex-buffer",
+                    wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                );
+                self.vertex_buffer = vertex_buffer;
+                self.vertex_capacity_bytes = vertex_capacity;
                 self.queue.write_buffer(
                     &self.vertex_buffer,
                     0,
-                    bytemuck::cast_slice(&vertices),
+                    bytemuck::cast_slice(&self.batch.vertices),
+                );
+
+                let (index_buffer, index_capacity) = grow_buffer(
+                    &self.device,
+                    &self.index_buffer,
+                    self.index_capacity_bytes,
+                    self.batch.indices.len() as u64 * INDEX_BYTES,
+                    "pet2d-index-buffer",
+                    wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                );
+                self.index_buffer = index_buffer;
+                self.index_capacity_bytes = index_capacity;
+                self.queue.write_buffer(
+                    &self.index_buffer,
+                    0,
+                    bytemuck::cast_slice(&self.batch.indices),
                 );
 
                 render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(
-                    self.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                // one draw per texture group; SpriteBatch (texture loading
-                // ticket) collapses same-texture runs into single draw calls
-                for (i, quad) in self.quads.iter().enumerate() {
-                    render_pass.set_bind_group(pipeline::TEXTURE_GROUP, &quad.bind_group, &[]);
-                    render_pass.draw_indexed(0..6, (i * 4) as i32, 0..1);
+                render_pass
+                    .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                // one draw call per texture group
+                for group in self.batch.groups() {
+                    render_pass.set_bind_group(pipeline::TEXTURE_GROUP, &group.texture, &[]);
+                    render_pass.draw_indexed(group.start..group.start + group.count, 0, 0..1);
                 }
             }
         }
@@ -319,7 +379,10 @@ mod tests {
 
     #[test]
     fn prefers_premultiplied() {
-        let modes = [CompositeAlphaMode::Opaque, CompositeAlphaMode::PreMultiplied];
+        let modes = [
+            CompositeAlphaMode::Opaque,
+            CompositeAlphaMode::PreMultiplied,
+        ];
         assert_eq!(choose_alpha_mode(&modes), CompositeAlphaMode::PreMultiplied);
     }
 

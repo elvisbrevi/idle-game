@@ -1,8 +1,8 @@
 // Sprite pipeline: quads transformed by the Camera2D projection uniform.
 // Group 0 carries the camera matrix; group 1 binds the texture and its
 // sampler. Alpha blending composes transparent sprites over whatever was
-// drawn (or cleared) before. One draw call per queued quad until SpriteBatch
-// arrives with texture loading.
+// drawn (or cleared) before. The vertex tint multiplies the sampled texel;
+// SpriteBatch collapses same-texture runs into single draw calls.
 
 /// Bind group index of the camera uniform in the sprite pipeline.
 pub(crate) const CAMERA_GROUP: u32 = 0;
@@ -17,23 +17,32 @@ const SHADER: &str = r#"
 struct VsOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
+    @location(1) color: vec4<f32>,
 };
 
 @vertex
-fn vs_main(@location(0) position: vec2<f32>, @location(1) uv: vec2<f32>) -> VsOutput {
+fn vs_main(
+    @location(0) position: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) color: vec4<f32>,
+) -> VsOutput {
     var output: VsOutput;
     output.position = camera * vec4<f32>(position, 0.0, 1.0);
     output.uv = uv;
+    output.color = color;
     return output;
 }
 
 @fragment
 fn fs_main(output: VsOutput) -> @location(0) vec4<f32> {
-    return textureSample(t_texture, t_sampler, output.uv);
+    return textureSample(t_texture, t_sampler, output.uv) * output.color;
 }
 "#;
 
-pub(crate) fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+pub(crate) fn create_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("pet2d-sprite-shader"),
         source: wgpu::ShaderSource::Wgsl(SHADER.into()),

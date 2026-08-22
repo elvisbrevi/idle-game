@@ -8,3 +8,5 @@ wgpu = "24"
 raw-window-handle = "0.6"
 thiserror = "2"
 bytemuck = { version = "1", features = ["derive"] }
+image = "0.25"
+glam = "0.29"
